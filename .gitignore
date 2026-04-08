@@ -1,0 +1,34 @@
+# CMake & Build
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.cmake
+
+# Build outputs
+*.elf
+*.uf2
+*.hex
+*.bin
+*.map
+*.lst
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+.directory
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Dependencies
+.pico-sdk/
