@@ -12,6 +12,6 @@ int main() {
 
     while (true) {
         tud_task(); // USB 작업 처리 (매우 중요!)
-        sleep_ms(1);
+        // sleep_ms(1);
     }
 }

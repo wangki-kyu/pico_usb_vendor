@@ -42,13 +42,37 @@ const uint8_t desc_configuration[] = {
     )
 };
 
-// String Descriptor
-const char string_manufacturer[] = "TestMfg";
-const char string_product[] = "Pico USB Device";
-const char string_serial[] = "123456";
+// String Descriptor (UTF-16 LE format required by USB spec)
 
-const uint8_t *desc_strings[4] = {
-    NULL
+// Language descriptor (Index 0)
+static const uint16_t _desc_str_langid[] = {
+    (uint16_t) ((TUSB_DESC_STRING << 8) | (2 + 2)),
+    0x0409  // English US
+};
+
+// Manufacturer string descriptor (Index 1)
+static const uint16_t _desc_str_manufacturer[] = {
+    (uint16_t) ((TUSB_DESC_STRING << 8) | (2 + 2*7)),
+    'T', 'e', 's', 't', 'M', 'f', 'g', 0
+};
+
+// Product string descriptor (Index 2)
+static const uint16_t _desc_str_product[] = {
+    (uint16_t) ((TUSB_DESC_STRING << 8) | (2 + 2*15)),
+    'P', 'i', 'c', 'o', ' ', 'U', 'S', 'B', ' ', 'D', 'e', 'v', 'i', 'c', 'e', 0
+};
+
+// Serial number string descriptor (Index 3)
+static const uint16_t _desc_str_serial[] = {
+    (uint16_t) ((TUSB_DESC_STRING << 8) | (2 + 2*6)),
+    '1', '2', '3', '4', '5', '6', 0
+};
+
+static const uint16_t *_desc_string_table[] = {
+    _desc_str_langid,
+    _desc_str_manufacturer,
+    _desc_str_product,
+    _desc_str_serial
 };
 
 // ============== USB Callback Functions ==============
@@ -64,6 +88,17 @@ uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
 
 const uint16_t *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
     (void) langid;
+
+    // Index 0 always returns language descriptor
+    if (index == 0) {
+        return _desc_str_langid;
+    }
+
+    // Return string descriptor for valid indices
+    if (index < sizeof(_desc_string_table) / sizeof(_desc_string_table[0])) {
+        return _desc_string_table[index];
+    }
+
     return NULL;
 }
 
@@ -72,6 +107,11 @@ bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_requ
     (void) rhport;
     (void) stage;
     (void) request;
+
+    // For now, acknowledge control requests but don't process them
+    // Return true if handled, false if not
+    // Device enumeration doesn't strictly require vendor control transfers,
+    // so returning false is acceptable for basic enumeration
     return false;
 }
 
