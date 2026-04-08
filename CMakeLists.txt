@@ -40,6 +40,9 @@ add_executable(pico_test
     usb_descriptors.c
 )
 
+# Generate PIO headers from .pio files
+pico_generate_pio_header(pico_test ${CMAKE_CURRENT_LIST_DIR}/ws2812.pio)
+
 pico_set_program_name(pico_test "pico_test")
 pico_set_program_version(pico_test "0.1")
 
@@ -51,6 +54,7 @@ pico_enable_stdio_usb(pico_test 0)
 target_link_libraries(pico_test
         pico_stdlib
         tinyusb_device
+        hardware_pio
 )
 
 # Add the standard include files to the build

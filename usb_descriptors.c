@@ -1,6 +1,39 @@
 #include "tusb.h"
+#include <stdint.h>
+#include <string.h>
 
-// ============== USB Descriptor ==============
+/* ============================================================================
+ * LED Control Protocol Definition
+ * ============================================================================
+ *
+ * Command format: Single byte command
+ * Response format: Single byte status
+ */
+
+// LED control commands
+#define LED_CMD_OFF      0x00  // Turn LED off
+#define LED_CMD_ON       0x01  // Turn LED on
+#define LED_CMD_TOGGLE   0x02  // Toggle LED state
+#define LED_CMD_STATUS   0x03  // Query LED status
+
+// Response codes
+#define RESP_OK          0x00  // Command executed successfully
+#define RESP_INVALID     0xFF  // Invalid command received
+#define RESP_LED_OFF     0x00  // LED is currently OFF (for STATUS command)
+#define RESP_LED_ON      0x01  // LED is currently ON (for STATUS command)
+
+/* ============================================================================
+ * External LED Control Functions (defined in pico_test.c)
+ * ============================================================================ */
+
+extern void led_on(void);
+extern void led_off(void);
+extern void led_toggle(void);
+extern bool led_get_state(void);
+
+/* ============================================================================
+ * USB Descriptor
+ * ============================================================================ */
 
 // Device Descriptor
 const tusb_desc_device_t desc_device = {
@@ -115,13 +148,56 @@ bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_requ
     return false;
 }
 
+/* ============================================================================
+ * USB Vendor Bulk RX Callback
+ * ============================================================================
+ *
+ * Handles incoming vendor-specific bulk transfer from host.
+ * Processes LED control commands and sends back response status.
+ *
+ * Protocol:
+ *   - Input: Single byte command (0x00 to 0x03)
+ *   - Output: Single byte response (0x00=OK/LED_OFF, 0x01=LED_ON, 0xFF=Invalid)
+ *
+ * @param itf      Interface index (not used in this implementation)
+ * @param buffer   Pointer to received data buffer
+ * @param bufsize  Number of bytes received
+ */
+// External pending command variable
+extern volatile uint8_t pending_command;
+
 void tud_vendor_rx_cb(uint8_t itf, uint8_t const* buffer, uint16_t bufsize) {
-    (void) itf;
-    (void) buffer;
-    (void) bufsize;
+    // Explicitly read from buffer to clear hardware buffer and arm OUT endpoint
+    uint8_t dummy[64];
+    tud_vendor_n_read(itf, dummy, bufsize);
+
+    // Extract command byte from read data
+    uint8_t command = dummy[0];
+
+    // Queue command for main loop to process
+    // This avoids blocking operations in USB interrupt handler
+    if (command <= 0x02) {  // Valid commands: 0x00, 0x01, 0x02
+        pending_command = command;
+    }
 }
 
+
+/* ============================================================================
+ * USB Vendor Bulk TX Callback
+ * ============================================================================
+ *
+ * Called when the bulk IN transfer completes.
+ * Currently not used, but kept for future enhancements such as:
+ * - Tracking transmission status
+ * - Implementing multi-packet responses
+ * - Debug logging
+ *
+ * @param itf        Interface index
+ * @param sent_bytes Number of bytes successfully transmitted
+ */
 void tud_vendor_tx_cb(uint8_t itf, uint32_t sent_bytes) {
-    (void) itf;
-    (void) sent_bytes;
+    (void) itf;           // Interface index not used
+    (void) sent_bytes;    // Sent bytes not used in current implementation
+
+    // TODO: Implement if multi-packet responses or status tracking is needed
 }
