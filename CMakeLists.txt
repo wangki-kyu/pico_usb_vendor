@@ -55,6 +55,7 @@ target_link_libraries(pico_test
         pico_stdlib
         tinyusb_device
         hardware_pio
+        hardware_adc
 )
 
 # Add the standard include files to the build

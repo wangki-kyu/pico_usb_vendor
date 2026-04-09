@@ -5,6 +5,7 @@
 #include "hardware/gpio.h"
 #include "hardware/pio.h"
 #include "hardware/clocks.h"
+#include "hardware/adc.h"
 #include "ws2812.pio.h"
 
 /* ============================================================================
@@ -86,6 +87,39 @@ bool led_get_state(void) {
 }
 
 /* ============================================================================
+ * Temperature Sensor (ADC Channel 4)
+ * ============================================================================
+ *
+ * RP2040 internal temperature sensor on ADC Channel 4
+ * Conversion: Raw ADC value -> Temperature in Celsius
+ */
+
+/**
+ * Initialize ADC for temperature sensor
+ */
+void adc_temp_init(void) {
+    adc_init();
+    adc_set_temp_sensor_enabled(true);
+}
+
+/**
+ * Read temperature from internal sensor
+ * @return Temperature in Celsius (float)
+ */
+float adc_get_temperature(void) {
+    adc_select_input(4);  // Select temperature sensor (ADC channel 4)
+    uint16_t raw = adc_read();
+
+    // RP2040 temperature sensor conversion formula
+    // Voltage = (raw / 4095) * 3.3V
+    // Temperature = 27 - (V - 0.706) / 0.001721
+    float voltage = (raw / 4095.0f) * 3.3f;
+    float temperature = 27.0f - (voltage - 0.706f) / 0.001721f;
+
+    return temperature;
+}
+
+/* ============================================================================
  * USB Device Initialization
  * ============================================================================
  *
@@ -109,6 +143,9 @@ void usb_device_init(void) {
 int main() {
     // Initialize LED hardware
     led_init();
+
+    // Initialize temperature sensor (ADC Channel 4)
+    adc_temp_init();
 
     // ============================================================================
     // LED Self-Test on Startup

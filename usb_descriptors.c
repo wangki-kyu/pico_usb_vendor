@@ -16,6 +16,9 @@
 #define LED_CMD_TOGGLE   0x02  // Toggle LED state
 #define LED_CMD_STATUS   0x03  // Query LED status
 
+// Temperature sensor commands
+#define TEMP_CMD_READ    0x10  // Read internal temperature sensor
+
 // Response codes
 #define RESP_OK          0x00  // Command executed successfully
 #define RESP_INVALID     0xFF  // Invalid command received
@@ -30,6 +33,12 @@ extern void led_on(void);
 extern void led_off(void);
 extern void led_toggle(void);
 extern bool led_get_state(void);
+
+/* ============================================================================
+ * External Temperature Sensor Functions (defined in pico_test.c)
+ * ============================================================================ */
+
+extern float adc_get_temperature(void);
 
 /* ============================================================================
  * USB Descriptor
@@ -174,9 +183,23 @@ void tud_vendor_rx_cb(uint8_t itf, uint8_t const* buffer, uint16_t bufsize) {
     // Extract command byte from read data
     uint8_t command = dummy[0];
 
-    // Queue command for main loop to process
+    // Handle temperature read command immediately (no blocking operations)
+    if (command == TEMP_CMD_READ) {
+        float temperature = adc_get_temperature();
+
+        // // Convert to response format: [integer_part, decimal_part]
+        // // Example: 25.46°C -> [0x19, 0x2E] (25, 46)
+        uint8_t temp_int = (uint8_t)temperature;
+        uint8_t temp_dec = (uint8_t)((temperature - temp_int) * 100.0f);
+
+        uint8_t response[2] = {temp_int, temp_dec};
+        // uint8_t response[2] = {0x19, 0x25};
+        tud_vendor_n_write(itf, response, 2);
+        tud_vendor_n_write_flush(itf);
+    }
+    // Queue LED commands for main loop to process
     // This avoids blocking operations in USB interrupt handler
-    if (command <= 0x02) {  // Valid commands: 0x00, 0x01, 0x02
+    else if (command <= 0x03) {  // Valid LED commands: 0x00, 0x01, 0x02, 0x03
         pending_command = command;
     }
 }
