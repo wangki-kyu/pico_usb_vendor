@@ -3,6 +3,22 @@
 #include <string.h>
 
 /* ============================================================================
+ * NPU Model Reception State Machine
+ * ============================================================================ */
+
+#define MODEL_BUFFER_SIZE (60 * 1024)  // 50KB for model data
+
+typedef enum {
+    MODEL_RX_IDLE = 0,
+    MODEL_RX_RECEIVING,
+} model_rx_state_t;
+
+static uint8_t model_buffer[MODEL_BUFFER_SIZE];
+static volatile model_rx_state_t model_rx_state = MODEL_RX_IDLE;
+static volatile uint16_t model_rx_total = 0;
+static volatile uint16_t model_rx_offset = 0;
+
+/* ============================================================================
  * LED Control Protocol Definition
  * ============================================================================
  *
@@ -18,6 +34,9 @@
 
 // Temperature sensor commands
 #define TEMP_CMD_READ    0x10  // Read internal temperature sensor
+
+// NPU model commands
+#define CMD_MODEL_LOAD   0x20  // Load model data from host
 
 // Response codes
 #define RESP_OK          0x00  // Command executed successfully
@@ -39,6 +58,12 @@ extern bool led_get_state(void);
  * ============================================================================ */
 
 extern float adc_get_temperature(void);
+
+/* ============================================================================
+ * External Model Ready Flag (defined in pico_test.c)
+ * ============================================================================ */
+
+extern volatile bool model_ready;
 
 /* ============================================================================
  * USB Descriptor
@@ -176,24 +201,97 @@ bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_requ
 extern volatile uint8_t pending_command;
 
 void tud_vendor_rx_cb(uint8_t itf, uint8_t const* buffer, uint16_t bufsize) {
-    // Explicitly read from buffer to clear hardware buffer and arm OUT endpoint
-    uint8_t dummy[64];
-    tud_vendor_n_read(itf, dummy, bufsize);
+    // Read from USB buffer to clear hardware buffer and arm OUT endpoint
+    uint8_t tmp[64];
+    uint16_t len = tud_vendor_n_read(itf, tmp, bufsize);
 
-    // Extract command byte from read data
-    uint8_t command = dummy[0];
+    // ========== Model Reception State Machine ==========
+    if (model_rx_state == MODEL_RX_RECEIVING) {
+        // Already receiving model - accumulate data
+        uint16_t remaining = model_rx_total - model_rx_offset;
+        uint16_t to_copy = (len < remaining) ? len : remaining;
 
-    // Handle temperature read command immediately (no blocking operations)
-    if (command == TEMP_CMD_READ) {
+        memcpy(model_buffer + model_rx_offset, tmp, to_copy);
+        model_rx_offset += to_copy;
+
+        // Check if reception complete
+        if (model_rx_offset >= model_rx_total) {
+            model_rx_state = MODEL_RX_IDLE;
+            model_ready = true;
+
+            // // Send ACK: [0x00][received_high][received_low]
+            // uint8_t ack[3] = {
+            //     0x00,
+            //     (uint8_t)(model_rx_offset >> 8),
+            //     (uint8_t)(model_rx_offset & 0xFF)
+            // };
+            // tud_vendor_n_write(itf, ack, 3);
+            // tud_vendor_n_write_flush(itf);
+        }
+        return;
+    }
+
+    // ========== Command Processing ==========
+    uint8_t command = tmp[0];
+
+    // Handle model load command
+    if (command == CMD_MODEL_LOAD) {
+        // Parse header: [0x20][size_high][size_low][payload...]
+        if (len < 3) {
+            // Header incomplete
+            // uint8_t err = 0xFF;
+            // tud_vendor_n_write(itf, &err, 1);
+            // tud_vendor_n_write_flush(itf);
+            return;
+        }
+
+        uint16_t total = ((uint16_t)tmp[1] << 8) | tmp[2];
+
+        // Validate model size
+        if (total == 0 || total > MODEL_BUFFER_SIZE) {
+            // uint8_t err = 0xFF;
+            // tud_vendor_n_write(itf, &err, 1);
+            // tud_vendor_n_write_flush(itf);
+            return;
+        }
+
+        // Initialize model reception
+        model_rx_total = total;
+        model_rx_offset = 0;
+        model_rx_state = MODEL_RX_RECEIVING;
+        model_ready = false;
+
+        // Copy first payload immediately
+        uint16_t first_payload = len - 3;
+        if (first_payload > 0) {
+            memcpy(model_buffer, tmp + 3, first_payload);
+            model_rx_offset = first_payload;
+
+            // Check if completed in first packet
+            if (model_rx_offset >= model_rx_total) {
+                model_rx_state = MODEL_RX_IDLE;
+                model_ready = true;
+
+                // uint8_t ack[3] = {
+                //     0x00,
+                //     (uint8_t)(model_rx_offset >> 8),
+                //     (uint8_t)(model_rx_offset & 0xFF)
+                // };
+                // tud_vendor_n_write(itf, ack, 3);
+                // tud_vendor_n_write_flush(itf);
+            }
+        }
+    }
+    // Handle temperature read command
+    else if (command == TEMP_CMD_READ) {
         float temperature = adc_get_temperature();
 
-        // // Convert to response format: [integer_part, decimal_part]
-        // // Example: 25.46°C -> [0x19, 0x2E] (25, 46)
+        // Convert to response format: [integer_part, decimal_part]
+        // Example: 25.46°C -> [0x19, 0x2E] (25, 46)
         uint8_t temp_int = (uint8_t)temperature;
         uint8_t temp_dec = (uint8_t)((temperature - temp_int) * 100.0f);
 
         uint8_t response[2] = {temp_int, temp_dec};
-        // uint8_t response[2] = {0x19, 0x25};
         tud_vendor_n_write(itf, response, 2);
         tud_vendor_n_write_flush(itf);
     }

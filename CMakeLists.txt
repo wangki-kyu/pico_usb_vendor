@@ -38,6 +38,7 @@ pico_sdk_init()
 add_executable(pico_test
     pico_test.c
     usb_descriptors.c
+    ei-sdk/classifier/ei_run_classifier_c.cpp
 )
 
 # Generate PIO headers from .pio files
@@ -61,6 +62,12 @@ target_link_libraries(pico_test
 # Add the standard include files to the build
 target_include_directories(pico_test PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
+        ${CMAKE_CURRENT_LIST_DIR}/ei-sdk
+        ${CMAKE_CURRENT_LIST_DIR}/ei-sdk/classifier
+        ${CMAKE_CURRENT_LIST_DIR}/ei-sdk/tensorflow
+        ${CMAKE_CURRENT_LIST_DIR}/ei-sdk/CMSIS/Core/Include
+        ${CMAKE_CURRENT_LIST_DIR}/ei-sdk/dsp
+        ${CMAKE_CURRENT_LIST_DIR}/ei-sdk/third_party/ruy
         ${PICO_SDK_PATH}/lib/tinyusb/src
         ${PICO_SDK_PATH}/lib/tinyusb/src/device
         ${PICO_SDK_PATH}/lib/tinyusb/hw/bsp/rp2040

@@ -24,6 +24,9 @@ static uint sm = 0;
 // USB command queue
 volatile uint8_t pending_command = 0xFF;  // 0xFF = no command pending
 
+// NPU model ready flag
+volatile bool model_ready = false;
+
 /* ============================================================================
  * LED Hardware Initialization
  * ============================================================================
@@ -175,6 +178,15 @@ int main() {
         // Process USB events (bulk transfers, control transfers, etc.)
         // This must be called frequently to maintain USB communication
         tud_task();
+
+        // Process model ready signal from USB callback
+        if (model_ready) {
+            // Model data has been received and stored in SRAM
+            // TODO: Load model using TensorFlow Lite Micro
+            // For now, indicate successful reception with LED
+            led_on();
+            model_ready = false;
+        }
 
         // Process pending LED command from USB callback
         if (pending_command != 0xFF) {
