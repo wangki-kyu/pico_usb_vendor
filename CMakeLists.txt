@@ -28,31 +28,35 @@ set(PICO_BOARD pico CACHE STRING "Board type")
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
-project(pico_test C CXX ASM)
+project(app C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
+
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(pico_test
-    pico_test.c
+add_executable(app
+    pico_test.cpp
     usb_descriptors.c
-    ei-sdk/classifier/ei_run_classifier_c.cpp
 )
 
-# Generate PIO headers from .pio files
-pico_generate_pio_header(pico_test ${CMAKE_CURRENT_LIST_DIR}/ws2812.pio)
 
-pico_set_program_name(pico_test "pico_test")
-pico_set_program_version(pico_test "0.1")
+# Add Edge Impulse SDK subdirectory
+add_subdirectory(micro-sdk)
+
+# Generate PIO headers from .pio files
+pico_generate_pio_header(app ${CMAKE_CURRENT_LIST_DIR}/ws2812.pio)
+
+pico_set_program_name(app "pico_test")
+pico_set_program_version(app "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(pico_test 0)
-pico_enable_stdio_usb(pico_test 0)
+pico_enable_stdio_uart(app 0)
+pico_enable_stdio_usb(app 0)
 
 # Add the standard library and TinyUSB to the build
-target_link_libraries(pico_test
+target_link_libraries(app
         pico_stdlib
         tinyusb_device
         hardware_pio
@@ -60,23 +64,20 @@ target_link_libraries(pico_test
 )
 
 # Add the standard include files to the build
-target_include_directories(pico_test PRIVATE
+target_include_directories(app PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
-        ${CMAKE_CURRENT_LIST_DIR}/ei-sdk
-        ${CMAKE_CURRENT_LIST_DIR}/ei-sdk/classifier
-        ${CMAKE_CURRENT_LIST_DIR}/ei-sdk/tensorflow
-        ${CMAKE_CURRENT_LIST_DIR}/ei-sdk/CMSIS/Core/Include
-        ${CMAKE_CURRENT_LIST_DIR}/ei-sdk/dsp
-        ${CMAKE_CURRENT_LIST_DIR}/ei-sdk/third_party/ruy
+        ${CMAKE_CURRENT_LIST_DIR}/micro-sdk/edge-impulse-sdk
+        ${CMAKE_CURRENT_LIST_DIR}/micro-sdk/edge-impulse-sdk/classifier
+        ${CMAKE_CURRENT_LIST_DIR}/micro-sdk/model-parameters
         ${PICO_SDK_PATH}/lib/tinyusb/src
         ${PICO_SDK_PATH}/lib/tinyusb/src/device
         ${PICO_SDK_PATH}/lib/tinyusb/hw/bsp/rp2040
 )
 
-pico_add_extra_outputs(pico_test)
+pico_add_extra_outputs(app)
 
 
 # TinyUSB가 Device 모드로 동작하도록 매크로를 명시적으로 설정합니다.
-target_compile_definitions(pico_test PRIVATE
+target_compile_definitions(app PRIVATE
     CFG_TUD_ENABLED=1
 )

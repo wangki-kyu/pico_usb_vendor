@@ -6,7 +6,7 @@
  * NPU Model Reception State Machine
  * ============================================================================ */
 
-#define MODEL_BUFFER_SIZE (60 * 1024)  // 50KB for model data
+#define MODEL_BUFFER_SIZE (60 * 1024)  // 60KB for model data
 
 typedef enum {
     MODEL_RX_IDLE = 0,
@@ -17,6 +17,24 @@ static uint8_t model_buffer[MODEL_BUFFER_SIZE];
 static volatile model_rx_state_t model_rx_state = MODEL_RX_IDLE;
 static volatile uint16_t model_rx_total = 0;
 static volatile uint16_t model_rx_offset = 0;
+
+/* ============================================================================
+ * Single Image Reception Buffer
+ * ============================================================================ */
+
+#define IMAGE_WIDTH   64
+#define IMAGE_HEIGHT  64
+#define IMAGE_CHANNELS 1
+#define IMAGE_SIZE    (IMAGE_WIDTH * IMAGE_HEIGHT * IMAGE_CHANNELS)  // 4096 bytes
+
+// Single image buffer (no ping-pong complexity)
+static int8_t image_buffer[IMAGE_SIZE] = {0};
+
+// Make buffer accessible from pico_test.c for inference
+extern volatile int8_t* image_data_ptr;
+volatile int8_t* image_data_ptr = image_buffer;
+
+extern volatile bool image_ready;  // Will be defined in pico_test.c
 
 /* ============================================================================
  * LED Control Protocol Definition
@@ -37,6 +55,7 @@ static volatile uint16_t model_rx_offset = 0;
 
 // NPU model commands
 #define CMD_MODEL_LOAD   0x20  // Load model data from host
+#define CMD_IMAGE_DATA   0x21  // Inference image data
 
 // Response codes
 #define RESP_OK          0x00  // Command executed successfully
@@ -64,6 +83,87 @@ extern float adc_get_temperature(void);
  * ============================================================================ */
 
 extern volatile bool model_ready;
+
+/* ============================================================================
+ * Model Reception Helper Functions
+ * ============================================================================ */
+
+/**
+ * Handle incoming model data during RECEIVING state
+ */
+static void handle_model_rx_data(uint8_t itf, const uint8_t* data, uint16_t len) {
+    uint16_t remaining = model_rx_total - model_rx_offset;
+    uint16_t to_copy = (len < remaining) ? len : remaining;
+
+    memcpy(model_buffer + model_rx_offset, data, to_copy);
+    model_rx_offset += to_copy;
+
+    // Check if reception complete
+    if (model_rx_offset >= model_rx_total) {
+        model_rx_state = MODEL_RX_IDLE;
+        model_ready = true;
+    }
+}
+
+/**
+ * Handle model load command (0x20)
+ */
+static void handle_model_load_cmd(uint8_t itf, const uint8_t* data, uint16_t len) {
+    // Parse header: [0x20][size_high][size_low][payload...]
+    if (len < 3) {
+        return;
+    }
+
+    uint16_t total = ((uint16_t)data[1] << 8) | data[2];
+
+    // Validate model size
+    if (total == 0 || total > MODEL_BUFFER_SIZE) {
+        return;
+    }
+
+    // Initialize model reception
+    model_rx_total = total;
+    model_rx_offset = 0;
+    model_rx_state = MODEL_RX_RECEIVING;
+    model_ready = false;
+
+    // Copy first payload immediately
+    uint16_t first_payload = len - 3;
+    if (first_payload > 0) {
+        memcpy(model_buffer, data + 3, first_payload);
+        model_rx_offset = first_payload;
+
+        // Check if completed in first packet
+        if (model_rx_offset >= model_rx_total) {
+            model_rx_state = MODEL_RX_IDLE;
+            model_ready = true;
+        }
+    }
+}
+
+/**
+ * Handle image data for inference (0x21)
+ * Simple approach: copy data to buffer and set ready flag
+ */
+static void handle_image_data_cmd(uint8_t itf, const uint8_t* data, uint16_t len) {
+    // Image data: [0x21][image_data...]
+
+    if (len < 2) {  // At least command byte + some data
+        return;
+    }
+
+    uint16_t image_data_len = len - 1;  // Skip command byte
+    const uint8_t* image_data = data + 1;
+
+    // Copy to single buffer
+    uint16_t to_copy = (image_data_len < IMAGE_SIZE) ? image_data_len : IMAGE_SIZE;
+    memcpy(image_buffer, (int8_t*)image_data, to_copy);
+
+    // Mark as ready for processing
+    if (to_copy > 0) {
+        image_ready = true;
+    }
+}
 
 /* ============================================================================
  * USB Descriptor
@@ -207,27 +307,7 @@ void tud_vendor_rx_cb(uint8_t itf, uint8_t const* buffer, uint16_t bufsize) {
 
     // ========== Model Reception State Machine ==========
     if (model_rx_state == MODEL_RX_RECEIVING) {
-        // Already receiving model - accumulate data
-        uint16_t remaining = model_rx_total - model_rx_offset;
-        uint16_t to_copy = (len < remaining) ? len : remaining;
-
-        memcpy(model_buffer + model_rx_offset, tmp, to_copy);
-        model_rx_offset += to_copy;
-
-        // Check if reception complete
-        if (model_rx_offset >= model_rx_total) {
-            model_rx_state = MODEL_RX_IDLE;
-            model_ready = true;
-
-            // // Send ACK: [0x00][received_high][received_low]
-            // uint8_t ack[3] = {
-            //     0x00,
-            //     (uint8_t)(model_rx_offset >> 8),
-            //     (uint8_t)(model_rx_offset & 0xFF)
-            // };
-            // tud_vendor_n_write(itf, ack, 3);
-            // tud_vendor_n_write_flush(itf);
-        }
+        handle_model_rx_data(itf, tmp, len);
         return;
     }
 
@@ -236,51 +316,12 @@ void tud_vendor_rx_cb(uint8_t itf, uint8_t const* buffer, uint16_t bufsize) {
 
     // Handle model load command
     if (command == CMD_MODEL_LOAD) {
-        // Parse header: [0x20][size_high][size_low][payload...]
-        if (len < 3) {
-            // Header incomplete
-            // uint8_t err = 0xFF;
-            // tud_vendor_n_write(itf, &err, 1);
-            // tud_vendor_n_write_flush(itf);
-            return;
-        }
-
-        uint16_t total = ((uint16_t)tmp[1] << 8) | tmp[2];
-
-        // Validate model size
-        if (total == 0 || total > MODEL_BUFFER_SIZE) {
-            // uint8_t err = 0xFF;
-            // tud_vendor_n_write(itf, &err, 1);
-            // tud_vendor_n_write_flush(itf);
-            return;
-        }
-
-        // Initialize model reception
-        model_rx_total = total;
-        model_rx_offset = 0;
-        model_rx_state = MODEL_RX_RECEIVING;
-        model_ready = false;
-
-        // Copy first payload immediately
-        uint16_t first_payload = len - 3;
-        if (first_payload > 0) {
-            memcpy(model_buffer, tmp + 3, first_payload);
-            model_rx_offset = first_payload;
-
-            // Check if completed in first packet
-            if (model_rx_offset >= model_rx_total) {
-                model_rx_state = MODEL_RX_IDLE;
-                model_ready = true;
-
-                // uint8_t ack[3] = {
-                //     0x00,
-                //     (uint8_t)(model_rx_offset >> 8),
-                //     (uint8_t)(model_rx_offset & 0xFF)
-                // };
-                // tud_vendor_n_write(itf, ack, 3);
-                // tud_vendor_n_write_flush(itf);
-            }
-        }
+        handle_model_load_cmd(itf, tmp, len);
+    }
+    // Handle image data command
+    else if (command == CMD_IMAGE_DATA) {
+        led_toggle();
+        handle_image_data_cmd(itf, tmp, len);
     }
     // Handle temperature read command
     else if (command == TEMP_CMD_READ) {

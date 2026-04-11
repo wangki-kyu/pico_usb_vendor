@@ -8,6 +8,20 @@
 #include "hardware/adc.h"
 #include "ws2812.pio.h"
 
+/* TFLite Micro Inference */
+#include "micro-sdk/edge-impulse-sdk/classifier/ei_run_classifier.h"
+#include "micro-sdk/edge-impulse-sdk/classifier/ei_classifier_types.h"
+#include "micro-sdk/tflite-model/tflite_learn_956961_19.h"
+#include "micro-sdk/edge-impulse-sdk/classifier/ei_run_classifier_c.h"
+
+/* C/C++ compatibility for LED functions */
+extern "C" {
+    void led_on(void);
+    void led_off(void);
+    void led_toggle(void);
+    bool led_get_state(void);
+}
+
 /* ============================================================================
  * LED Control Configuration
  * ============================================================================ */
@@ -26,6 +40,112 @@ volatile uint8_t pending_command = 0xFF;  // 0xFF = no command pending
 
 // NPU model ready flag
 volatile bool model_ready = false;
+
+// NPU image ready flag
+volatile bool image_ready = false;
+
+/* ============================================================================
+ * TFLite Micro Inference Engine
+ * ============================================================================ */
+
+extern uint8_t model_buffer[];  // Model buffer from usb_descriptors.c
+
+// Image buffer for single image processing (64x64x1 int8)
+typedef struct {
+    int8_t data[64 * 64];
+} image_buffer_t;
+
+// Working buffer for float conversion
+static float image_float_buffer[64 * 64];
+
+static ei_impulse_result_t inference_result = {};
+
+/**
+ * Callback function for ei_run_classifier to get image data
+ * Converts int8 image data to float for inference
+ */
+static int get_image_data(size_t offset, size_t length, float *out_ptr) {
+    // Read from pre-converted float buffer
+    if (offset + length > 64 * 64) {
+        return EIDSP_OUT_OF_MEM;
+    }
+    memcpy(out_ptr, image_float_buffer + offset, length * sizeof(float));
+    return EIDSP_OK;
+}
+
+/**
+ * Send inference results (bounding boxes) to host via USB
+ */
+void send_inference_results(void) {
+    // Protocol: [0x22][count][box1_data][box2_data]...
+    // Each box: [x][y][w][h][confidence_int]
+
+    uint8_t response[64];  // Response buffer
+    uint16_t idx = 0;
+
+    response[idx++] = 0x22;  // Response code
+    response[idx++] = inference_result.bounding_boxes_count;
+
+    // Iterate through all detected bounding boxes
+    for (uint32_t i = 0; i < inference_result.bounding_boxes_count; i++) {
+        ei_impulse_result_bounding_box_t box = inference_result.bounding_boxes[i];
+
+        // Pack box data: [x_int][y_int][w_int][h_int][conf_int]
+        // Convert float coordinates to int8 (0-255 scale for 64x64 image)
+        uint8_t x = (uint8_t)(box.x * 255 / 64);
+        uint8_t y = (uint8_t)(box.y * 255 / 64);
+        uint8_t w = (uint8_t)(box.width * 255 / 64);
+        uint8_t h = (uint8_t)(box.height * 255 / 64);
+        uint8_t conf = (uint8_t)(box.value * 255);  // confidence 0.0-1.0 → 0-255
+
+        response[idx++] = x;
+        response[idx++] = y;
+        response[idx++] = w;
+        response[idx++] = h;
+        response[idx++] = conf;
+    }
+
+    // Send results via USB
+    tud_vendor_n_write(0, response, 64);
+    tud_vendor_n_write_flush(0);
+}
+
+/**
+ * Run TFLite inference on the loaded model and image data
+ */
+void run_tflite_inference(volatile int8_t* image_data) {
+    // Step 1: Convert int8 image data to float
+    // Normalize int8 [-128, 127] to float [0, 1] or [-1, 1] depending on model
+    // for (int i = 0; i < 64 * 64; i++) {
+    //     // Convert to 0-1 range (assuming unsigned interpretation)
+    //     image_float_buffer[i] = (float)(image_data[i] + 128) / 255.0f;
+    // }
+
+    // // Step 2: Create signal_t structure for ei_run_classifier
+    // signal_t signal;
+    // signal.total_length = 64 * 64;
+    // signal.get_data = &get_image_data;
+
+    // // Step 3: Run inference
+    // EI_IMPULSE_ERROR err = ei_run_classifier(&signal, &inference_result, false);
+
+    // if (err != EI_IMPULSE_OK) {
+    //     // Handle inference error - return empty results
+    //     inference_result.bounding_boxes_count = 0;
+    // }
+
+    // Step 4: Toggle LED to indicate inference completion
+    led_toggle();
+
+    // Step 5: Send results back to host
+    send_inference_results();
+}
+
+/* ============================================================================
+ * External Image Buffer (from usb_descriptors.c)
+ * ============================================================================ */
+
+extern volatile int8_t* image_data_ptr;  // Image buffer from usb_descriptors.c
 
 /* ============================================================================
  * LED Hardware Initialization
@@ -109,17 +229,20 @@ void adc_temp_init(void) {
  * Read temperature from internal sensor
  * @return Temperature in Celsius (float)
  */
-float adc_get_temperature(void) {
-    adc_select_input(4);  // Select temperature sensor (ADC channel 4)
-    uint16_t raw = adc_read();
 
-    // RP2040 temperature sensor conversion formula
-    // Voltage = (raw / 4095) * 3.3V
-    // Temperature = 27 - (V - 0.706) / 0.001721
-    float voltage = (raw / 4095.0f) * 3.3f;
-    float temperature = 27.0f - (voltage - 0.706f) / 0.001721f;
+extern "C" {
+    float adc_get_temperature(void) {
+        adc_select_input(4);  // Select temperature sensor (ADC channel 4)
+        uint16_t raw = adc_read();
 
-    return temperature;
+        // RP2040 temperature sensor conversion formula
+        // Voltage = (raw / 4095) * 3.3V
+        // Temperature = 27 - (V - 0.706) / 0.001721
+        float voltage = (raw / 4095.0f) * 3.3f;
+        float temperature = 27.0f - (voltage - 0.706f) / 0.001721f;
+
+        return temperature;
+    }
 }
 
 /* ============================================================================
@@ -182,10 +305,19 @@ int main() {
         // Process model ready signal from USB callback
         if (model_ready) {
             // Model data has been received and stored in SRAM
-            // TODO: Load model using TensorFlow Lite Micro
-            // For now, indicate successful reception with LED
+            // Load TFLite model from buffer
             led_on();
             model_ready = false;
+
+            // TODO: Initialize TFLite interpreter with model_buffer
+            // This would be done here after model is fully received
+        }
+
+        // Process image data and run inference
+        if (image_ready) {
+            // Image data received and ready for inference
+            run_tflite_inference(image_data_ptr);
+            image_ready = false;
         }
 
         // Process pending LED command from USB callback
