@@ -151,73 +151,73 @@ extern "C"
 {
     bool runInference(const int8_t *input_data, float *output_data)
     {
-        // led_on_with_color(LED_COLOR_YELLOW);
-        // sleep_ms(300);
-        // led_on_with_color(LED_COLOR_YELLOW);
-        // sleep_ms(300);
-        // led_on_with_color(LED_COLOR_YELLOW);
-        // sleep_ms(300);
+        printf("[INFERENCE] Starting inference...\n");
+        fflush(stdout);
 
+        // Step 1: Validate interpreter
         if (!g_interpreter)
         {
-            fprintf(stderr, "Error: Interpreter not initialized\n");
-            led_on();
+            printf("[INFERENCE] ERROR: Interpreter not initialized\n");
+            fflush(stdout);
             return false;
         }
 
+        // Step 2: Validate input/output pointers
         if (!input_data || !output_data)
         {
-            fprintf(stderr, "Error: Invalid input or output pointer\n");
-            led_on();
+            printf("[INFERENCE] ERROR: Invalid input or output pointer\n");
+            fflush(stdout);
             return false;
         }
 
-        // Step 1: Set input tensor
+        // Step 3: Get input tensor
         TfLiteTensor *input_tensor = g_interpreter->input(0);
         if (!input_tensor)
         {
-            fprintf(stderr, "Error: Cannot get input tensor\n");
-            led_on();
+            printf("[INFERENCE] ERROR: Cannot get input tensor\n");
+            fflush(stdout);
             return false;
         }
 
-        // Copy input data to tensor
+        // Step 4: Copy input data to tensor
         memcpy(input_tensor->data.int8, input_data, 64 * 64 * sizeof(int8_t));
+        printf("[INFERENCE] Input data copied (4096 bytes)\n");
+        fflush(stdout);
 
-        // Step 2: Run inference
+        // Step 5: Run inference
         TfLiteStatus invoke_status = g_interpreter->Invoke();
         if (invoke_status != kTfLiteOk)
         {
-            led_on();
-            fprintf(stderr, "Error: Invoke failed\n");
+            printf("[INFERENCE] ERROR: Invoke failed (status=%d)\n", invoke_status);
+            fflush(stdout);
             return false;
         }
+        printf("[INFERENCE] Model invoked successfully\n");
+        fflush(stdout);
 
-        // Step 3: Read output tensor
+        // Step 6: Get output tensor
         TfLiteTensor *output_tensor = g_interpreter->output(0);
         if (!output_tensor)
         {
-            led_on();
-            fprintf(stderr, "Error: Cannot get output tensor\n");
+            printf("[INFERENCE] ERROR: Cannot get output tensor\n");
+            fflush(stdout);
             return false;
         }
 
-        // Step 4: Dequantize INT8 output to float32
+        // Step 7: Dequantize INT8 output to float32
         // Formula: float = (int8 + 128) / 256
         int8_t *tensor_output = output_tensor->data.int8;
+        printf("[INFERENCE] Processing 64 output values (8x8 grid)...\n");
+        fflush(stdout);
 
         for (int i = 0; i < 8 * 8; i++)
         {
-            led_on();
-            sleep_ms(200);
             int8_t raw = tensor_output[i * 2 + 1]; // face class (index 1)
             output_data[i] = (static_cast<float>(raw) + 128.0f) / 256.0f;
-            led_off();
-            sleep_ms(200);
         }
 
-        printf("Inference complete: [1,8,8,2] output dequantized to [8,8] float\n");
-        // led_on();
+        printf("[INFERENCE] SUCCESS: [1,8,8,2] output dequantized to [8,8] float\n");
+        fflush(stdout);
         return true;
     }
 }
