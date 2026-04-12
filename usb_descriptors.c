@@ -196,17 +196,17 @@ static void handle_image_data_cmd(uint8_t itf, const uint8_t* data, uint16_t len
  * USB Descriptor
  * ============================================================================ */
 
-// Device Descriptor
+// Device Descriptor (Composite Device)
 const tusb_desc_device_t desc_device = {
     .bLength            = sizeof(tusb_desc_device_t),
     .bDescriptorType    = TUSB_DESC_DEVICE,
     .bcdUSB             = 0x0200,
-    .bDeviceClass       = 0x00,
-    .bDeviceSubClass    = 0x00,
-    .bDeviceProtocol    = 0x00,
+    .bDeviceClass       = 0xEF,                      // Miscellaneous Device (Composite)
+    .bDeviceSubClass    = 0x02,                      // Common Class
+    .bDeviceProtocol    = 0x01,                      // Interface Association Descriptor
     .bMaxPacketSize0    = CFG_TUD_ENDPOINT0_SIZE,
     .idVendor           = 0xCAFE,
-    .idProduct          = 0x4005,
+    .idProduct          = 0x4006,  // Changed from 0x4005 to force Windows to re-read descriptors
     .bcdDevice          = 0x0100,
     .iManufacturer      = 0x01,
     .iProduct           = 0x02,
@@ -215,25 +215,31 @@ const tusb_desc_device_t desc_device = {
 };
 
 // Configuration Descriptor
-const uint8_t desc_configuration[] = {
-    // Configuration Descriptor
-    TUD_CONFIG_DESCRIPTOR(
-        1,                                  // Configuration number
-        1,                                  // Interface count
-        0,                                  // String index
-        (9 + 9 + 7 + 7),                   // Total length (config + interface + endpoint*2)
-        0,                                  // Attributes (Bus Powered)
-        100                                 // Max power (200mA)
-    ),
+enum {
+    ITF_NUM_CDC_CMD = 0,    // CDC Control (Interface 0)
+    ITF_NUM_CDC_DATA,       // CDC Data (Interface 1)
+    ITF_NUM_VENDOR,         // Vendor (Interface 2)
+    ITF_NUM_TOTAL
+};
 
-    // Interface Descriptor (Vendor)
-    TUD_VENDOR_DESCRIPTOR(
-        0,                                  // Interface number
-        0,                                  // String index
-        0x81,                               // IN endpoint
-        0x01,                               // OUT endpoint
-        64                                  // Max packet size
-    )
+// Endpoint numbers
+#define EPNUM_CDC_NOTIF   0x81
+#define EPNUM_CDC_OUT     0x02
+#define EPNUM_CDC_IN      0x82
+#define EPNUM_VENDOR_OUT  0x03
+#define EPNUM_VENDOR_IN   0x83
+
+#define CONFIG_TOTAL_LEN  (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_VENDOR_DESC_LEN)
+
+const uint8_t desc_configuration[] = {
+    // Config number, interface count, string index, total length, attribute, power in mA
+    TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, CONFIG_TOTAL_LEN, 0x00, 100),
+
+    // CDC first (IAD is automatically included by TUD_CDC_DESCRIPTOR)
+    TUD_CDC_DESCRIPTOR(ITF_NUM_CDC_CMD, 0, EPNUM_CDC_NOTIF, 8, EPNUM_CDC_OUT, EPNUM_CDC_IN, 64),
+
+    // Vendor second
+    TUD_VENDOR_DESCRIPTOR(ITF_NUM_VENDOR, 0, EPNUM_VENDOR_IN, EPNUM_VENDOR_OUT, 64)
 };
 
 // String Descriptor (UTF-16 LE format required by USB spec)
@@ -389,4 +395,31 @@ void tud_vendor_tx_cb(uint8_t itf, uint32_t sent_bytes) {
     (void) sent_bytes;    // Sent bytes not used in current implementation
 
     // TODO: Implement if multi-packet responses or status tracking is needed
+}
+
+/* ============================================================================
+ * CDC Callbacks
+ * ============================================================================ */
+
+// CDC Line Coding Callback (Host->Device)
+void tud_cdc_line_coding_cb(uint8_t itf, cdc_line_coding_t const* p_line_coding) {
+    (void) itf;
+    // Handle line coding changes if needed (baud rate, data bits, stop bits, parity)
+    // Currently not used in this implementation
+}
+
+// CDC Control Callback (Host->Device)
+bool tud_cdc_control_line_state_cb(uint8_t itf, bool dtr, bool rts) {
+    (void) itf;
+    (void) dtr;  // Data Terminal Ready
+    (void) rts;  // Request To Send
+    // Handle DTR/RTS state changes if needed
+    return true;
+}
+
+// CDC RX Callback - received data from host
+void tud_cdc_rx_cb(uint8_t itf) {
+    (void) itf;
+    // CDC data is available via tud_cdc_n_read()
+    // Handle CDC data reception here if needed
 }

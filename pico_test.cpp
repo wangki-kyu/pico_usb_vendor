@@ -38,15 +38,15 @@ extern "C"
 #define IS_RGBW false
 
 // LED Color Definitions (WS2812B RGB format)
-#define LED_COLOR_RED    0xFF0000  // 빨강
-#define LED_COLOR_ORANGE 0xFFA500  // 주황
-#define LED_COLOR_YELLOW 0xFFFF00  // 노랑
-#define LED_COLOR_GREEN  0x00FF00  // 초록
-#define LED_COLOR_BLUE   0x0000FF  // 파랑
-#define LED_COLOR_INDIGO 0x4B0082  // 남색
-#define LED_COLOR_VIOLET 0x800080  // 보라
-#define LED_COLOR_WHITE  0xFFFFFF  // 흰색
-#define LED_COLOR_OFF    0x000000  // 검정 (OFF)
+#define LED_COLOR_RED 0xFF0000    // 빨강
+#define LED_COLOR_ORANGE 0xFFA500 // 주황
+#define LED_COLOR_YELLOW 0xFFFF00 // 노랑
+#define LED_COLOR_GREEN 0x00FF00  // 초록
+#define LED_COLOR_BLUE 0x0000FF   // 파랑
+#define LED_COLOR_INDIGO 0x4B0082 // 남색
+#define LED_COLOR_VIOLET 0x800080 // 보라
+#define LED_COLOR_WHITE 0xFFFFFF  // 흰색
+#define LED_COLOR_OFF 0x000000    // 검정 (OFF)
 
 // LED state tracker - maintains current LED status for status queries
 static volatile bool led_state = false;
@@ -94,8 +94,6 @@ static ei_impulse_result_t inference_result = {};
  * Forward Declarations
  * ============================================================================ */
 
-
-
 /**
  * Initialize TFLite Micro Interpreter
  * Creates and configures the interpreter for model inference
@@ -103,11 +101,11 @@ static ei_impulse_result_t inference_result = {};
  */
 bool initializeInterpreter(void)
 {
-    led_on_with_color(LED_COLOR_RED);     // Step 1: Started initialization
+    led_on_with_color(LED_COLOR_RED); // Step 1: Started initialization
     sleep_ms(200);
 
     static tflite::AllOpsResolver resolver;
-    led_on_with_color(LED_COLOR_ORANGE);  // Step 2: Resolver created
+    led_on_with_color(LED_COLOR_ORANGE); // Step 2: Resolver created
     sleep_ms(200);
 
     static tflite::MicroInterpreter interpreter(
@@ -115,25 +113,25 @@ bool initializeInterpreter(void)
         resolver,
         tensor_arena,
         TENSOR_ARENA_SIZE);
-    led_on_with_color(LED_COLOR_YELLOW);  // Step 3: Interpreter created
+    led_on_with_color(LED_COLOR_YELLOW); // Step 3: Interpreter created
     sleep_ms(200);
 
     g_interpreter = &interpreter;
     g_resolver = &resolver;
-    led_on_with_color(LED_COLOR_GREEN);   // Step 4: Pointers assigned
+    led_on_with_color(LED_COLOR_GREEN); // Step 4: Pointers assigned
     sleep_ms(200);
 
     // Allocate tensors
     if (g_interpreter->AllocateTensors(true) != kTfLiteOk)
     {
         fprintf(stderr, "Error: AllocateTensors failed\n");
-        led_on_with_color(LED_COLOR_RED);  // Error: AllocateTensors failed
+        led_on_with_color(LED_COLOR_RED); // Error: AllocateTensors failed
         sleep_ms(500);
         led_off();
         return false;
     }
 
-    led_on_with_color(LED_COLOR_BLUE);    // Step 5: AllocateTensors successful
+    led_on_with_color(LED_COLOR_BLUE); // Step 5: AllocateTensors successful
     sleep_ms(200);
     led_off();
 
@@ -149,83 +147,80 @@ bool initializeInterpreter(void)
  * @param output_data Output buffer pointer for float32 probabilities [8x8]
  * @return true if inference successful, false otherwise
  */
-extern "C" {
-bool runInference(const int8_t *input_data, float *output_data)
+extern "C"
 {
-    // led_on_with_color(LED_COLOR_YELLOW);
-    // sleep_ms(300);
-    // led_on_with_color(LED_COLOR_YELLOW);
-    // sleep_ms(300);
-    // led_on_with_color(LED_COLOR_YELLOW);
-    // sleep_ms(300);
-    
-    if (!g_interpreter)
+    bool runInference(const int8_t *input_data, float *output_data)
     {
-        fprintf(stderr, "Error: Interpreter not initialized\n");
-        led_on();
-        return false;
+        // led_on_with_color(LED_COLOR_YELLOW);
+        // sleep_ms(300);
+        // led_on_with_color(LED_COLOR_YELLOW);
+        // sleep_ms(300);
+        // led_on_with_color(LED_COLOR_YELLOW);
+        // sleep_ms(300);
+
+        if (!g_interpreter)
+        {
+            fprintf(stderr, "Error: Interpreter not initialized\n");
+            led_on();
+            return false;
+        }
+
+        if (!input_data || !output_data)
+        {
+            fprintf(stderr, "Error: Invalid input or output pointer\n");
+            led_on();
+            return false;
+        }
+
+        // Step 1: Set input tensor
+        TfLiteTensor *input_tensor = g_interpreter->input(0);
+        if (!input_tensor)
+        {
+            fprintf(stderr, "Error: Cannot get input tensor\n");
+            led_on();
+            return false;
+        }
+
+        // Copy input data to tensor
+        memcpy(input_tensor->data.int8, input_data, 64 * 64 * sizeof(int8_t));
+
+        // Step 2: Run inference
+        TfLiteStatus invoke_status = g_interpreter->Invoke();
+        if (invoke_status != kTfLiteOk)
+        {
+            led_on();
+            fprintf(stderr, "Error: Invoke failed\n");
+            return false;
+        }
+
+        // Step 3: Read output tensor
+        TfLiteTensor *output_tensor = g_interpreter->output(0);
+        if (!output_tensor)
+        {
+            led_on();
+            fprintf(stderr, "Error: Cannot get output tensor\n");
+            return false;
+        }
+
+        // Step 4: Dequantize INT8 output to float32
+        // Formula: float = (int8 + 128) / 256
+        int8_t *tensor_output = output_tensor->data.int8;
+
+        for (int i = 0; i < 8 * 8; i++)
+        {
+            led_on();
+            sleep_ms(200);
+            int8_t raw = tensor_output[i * 2 + 1]; // face class (index 1)
+            output_data[i] = (static_cast<float>(raw) + 128.0f) / 256.0f;
+            led_off();
+            sleep_ms(200);
+        }
+
+        printf("Inference complete: [1,8,8,2] output dequantized to [8,8] float\n");
+        // led_on();
+        return true;
     }
-
-    if (!input_data || !output_data)
-    {
-        fprintf(stderr, "Error: Invalid input or output pointer\n");
-        led_on();
-        return false;
-    }
-
-    
-    // Step 1: Set input tensor
-    TfLiteTensor *input_tensor = g_interpreter->input(0);
-    if (!input_tensor)
-    {
-        fprintf(stderr, "Error: Cannot get input tensor\n");
-        led_on();
-        return false;
-    }
-
-    
-    // Copy input data to tensor
-    memcpy(input_tensor->data.int8, input_data, 64 * 64 * sizeof(int8_t));
-
-    
-    // Step 2: Run inference
-    TfLiteStatus invoke_status = g_interpreter->Invoke();
-    if (invoke_status != kTfLiteOk)
-    {
-        led_on();
-        fprintf(stderr, "Error: Invoke failed\n");
-        return false;
-    }
-
-    // Step 3: Read output tensor
-    TfLiteTensor *output_tensor = g_interpreter->output(0);
-    if (!output_tensor)
-    {
-        led_on();
-        fprintf(stderr, "Error: Cannot get output tensor\n");
-        return false;
-    }
-
-    // Step 4: Dequantize INT8 output to float32
-    // Formula: float = (int8 + 128) / 256
-    int8_t *tensor_output = output_tensor->data.int8;
-
-    for (int i = 0; i < 8 * 8; i++)
-    {
-        led_on();
-        sleep_ms(200);
-        int8_t raw = tensor_output[i * 2 + 1]; // face class (index 1)
-        output_data[i] = (static_cast<float>(raw) + 128.0f) / 256.0f;
-        led_off();
-        sleep_ms(200);
-    }
-
-    printf("Inference complete: [1,8,8,2] output dequantized to [8,8] float\n");
-    // led_on();
-    return true;
 }
-}
-
 
 /**
  * Callback function for ei_run_classifier to get image data
@@ -247,34 +242,36 @@ static int get_image_data(size_t offset, size_t length, float *out_ptr)
  * Sends 8x8 float probabilities as uint8 values (0-255 scale)
  * @param output Float array [8x8] with probability values (0.0-1.0)
  */
-extern "C" {
-void send_tflite_inference_results(const float *output)
+extern "C"
 {
-    uint8_t response[64] = { 0 };
-    // memset(response, 0, 64);
-    for (int i = 0; i < 64; i++)
+    void send_tflite_inference_results(const float *output)
     {
-        response[i] = (uint8_t)(output[i] * 255.0f);
+        uint8_t response[64] = {0};
+        // memset(response, 0, 64);
+        for (int i = 0; i < 64; i++)
+        {
+            response[i] = (uint8_t)(output[i] * 255.0f);
+        }
+        tud_vendor_n_write(0, response, 64);
+        tud_vendor_n_write_flush(0);
+        // printf("[USB] TFLite inference results sent\n");
     }
-    tud_vendor_n_write(0, response, 64);
-    tud_vendor_n_write_flush(0);
-    // printf("[USB] TFLite inference results sent\n");
-}
 
-void send_tflite_inference_results_test(const float *output)
-{
-    uint8_t response[64] = { 0,};
-    memset(response, 3, 64);
-    // for (int i = 0; i < 64; i++)
-    // {
-    //     response[i] = (uint8_t)(output[i] * 255.0f);
-    // }
-    tud_vendor_n_write(0, response, 64);
-    tud_vendor_n_write_flush(0);
-    // printf("[USB] TFLite inference results sent\n");
+    void send_tflite_inference_results_test(const float *output)
+    {
+        uint8_t response[64] = {
+            0,
+        };
+        memset(response, 3, 64);
+        // for (int i = 0; i < 64; i++)
+        // {
+        //     response[i] = (uint8_t)(output[i] * 255.0f);
+        // }
+        tud_vendor_n_write(0, response, 64);
+        tud_vendor_n_write_flush(0);
+        // printf("[USB] TFLite inference results sent\n");
+    }
 }
-}
-
 
 /**
  * Send inference results (bounding boxes) to host via USB
@@ -396,7 +393,8 @@ void led_init(void)
  * Turn on the LED with specified color
  * @param color RGB color in format (R << 16) | (G << 8) | B
  */
-extern "C" {
+extern "C"
+{
     void led_on_with_color(uint32_t color)
     {
         pio_sm_put_blocking(pio, sm, color);
@@ -404,7 +402,6 @@ extern "C" {
         sleep_ms(1000);
     }
 }
-
 
 /**
  * Turn on the LED (red color)
@@ -515,11 +512,16 @@ void usb_device_init(void)
  */
 int main()
 {
+    printf("Hello from Pico!\n");
+    // fflush(stdout);
     // Initialize LED hardware
     led_init();
 
     // Initialize temperature sensor (ADC Channel 4)
     adc_temp_init();
+
+    tusb_init();
+    stdio_init_all();
 
     led_on_with_color(LED_COLOR_OFF);
 
@@ -551,13 +553,15 @@ int main()
     // Initialize USB device stack
     usb_device_init();
 
-    // led_on_with_color(LED_COLOR_YELLOW);    // YELLOW가 아님 
+    // led_on_with_color(LED_COLOR_YELLOW);    // YELLOW가 아님
 
     // Main processing loop - runs indefinitely
     while (true)
     {
         // Process USB events (bulk transfers, control transfers, etc.)
         // This must be called frequently to maintain USB communication
+        // printf("test\n");
+        // fflush(stdout);
         tud_task();
 
         // Process model ready signal from USB callback

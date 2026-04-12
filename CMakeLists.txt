@@ -53,7 +53,7 @@ pico_set_program_version(app "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
 pico_enable_stdio_uart(app 0)
-pico_enable_stdio_usb(app 0)
+pico_enable_stdio_usb(app 1)
 
 # Add the standard library and TinyUSB to the build
 target_link_libraries(app

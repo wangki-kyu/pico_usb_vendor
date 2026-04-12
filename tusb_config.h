@@ -19,8 +19,11 @@
 // Vendor 끝점 크기
 #define CFG_TUD_VENDOR_EP_BUFSIZE           64
 
-// 다른 클래스는 비활성화
-#define CFG_TUD_CDC                         0
+// CDC 클래스 활성화 (복합 장치)
+#define CFG_TUD_CDC                         1
+#define CFG_TUD_CDC_EP_BUFSIZE              64
+#define CFG_TUD_CDC_RX_BUFSIZE              256
+#define CFG_TUD_CDC_TX_BUFSIZE              256
 #define CFG_TUD_MSC                         0
 #define CFG_TUD_HID                         0
 #define CFG_TUD_AUDIO                       0
