@@ -6,7 +6,7 @@
  * NPU Model Reception State Machine
  * ============================================================================ */
 
-#define MODEL_BUFFER_SIZE (60 * 1024)  // 60KB for model data
+#define MODEL_BUFFER_SIZE (1)  // 60KB for model data
 
 typedef enum {
     MODEL_RX_IDLE = 0,
@@ -71,6 +71,7 @@ extern void led_on(void);
 extern void led_off(void);
 extern void led_toggle(void);
 extern bool led_get_state(void);
+extern void led_on_with_color(uint32_t color);
 
 /* ============================================================================
  * External Temperature Sensor Functions (defined in pico_test.c)
@@ -87,6 +88,10 @@ extern volatile bool model_ready;
 /* ============================================================================
  * Model Reception Helper Functions
  * ============================================================================ */
+
+extern bool runInference(const int8_t *input_data, float *output_data);
+extern void send_tflite_inference_results(const float *output);
+extern void send_tflite_inference_results_test(const float *output);
 
 /**
  * Handle incoming model data during RECEIVING state
@@ -145,10 +150,18 @@ static void handle_model_load_cmd(uint8_t itf, const uint8_t* data, uint16_t len
  * Handle image data for inference (0x21)
  * Simple approach: copy data to buffer and set ready flag
  */
+extern void sleep_ms(uint32_t ms);
+
 static void handle_image_data_cmd(uint8_t itf, const uint8_t* data, uint16_t len) {
     // Image data: [0x21][image_data...]
 
+    // Step 1: Called
+    // led_on_with_color(0x00FF00);  // Green - function called
+    sleep_ms(200);
+
     if (len < 2) {  // At least command byte + some data
+        // led_on_with_color(0xFF0000);  // Red - data too short
+        sleep_ms(500);
         return;
     }
 
@@ -161,7 +174,21 @@ static void handle_image_data_cmd(uint8_t itf, const uint8_t* data, uint16_t len
 
     // Mark as ready for processing
     if (to_copy > 0) {
-        image_ready = true;
+        // led_on_with_color(0x0000FF);  // Blue - about to set image_ready
+        // sleep_ms(200);
+        // image_ready = true;
+        // led_on_with_color(0xFFFF00);  // Yellow - image_ready set complete
+        // sleep_ms(200);
+        float output[64]; 
+        memset(output, 0, sizeof(output));
+        if (runInference((const int8_t*)image_buffer, output)) {
+            // led_on();
+            output[0] = 0.5f;
+            send_tflite_inference_results(output);
+        } else {
+            led_on_with_color(0x800080);
+            send_tflite_inference_results_test(output);
+        }
     }
 }
 
@@ -320,7 +347,7 @@ void tud_vendor_rx_cb(uint8_t itf, uint8_t const* buffer, uint16_t bufsize) {
     }
     // Handle image data command
     else if (command == CMD_IMAGE_DATA) {
-        led_toggle();
+        // led_toggle();
         handle_image_data_cmd(itf, tmp, len);
     }
     // Handle temperature read command

@@ -1,7 +1,7 @@
 
-# Edge Impulse library for Face detection - FOMO
+# Edge Impulse library for Face detection - FOMO - Embedded Online Conference
 
-This is a C++ library that lets you run the impulse for "Face detection - FOMO" (https://studio.edgeimpulse.com/studio/956961) on any device. It consists of the Edge Impulse inferencing SDK - with implementations of both processing and learning blocks - and your model. You will need to include this library in your project to run your impulse locally.
+This is a C++ library that lets you run the impulse for "Face detection - FOMO - Embedded Online Conference" (https://studio.edgeimpulse.com/studio/958324) on any device. It consists of the Edge Impulse inferencing SDK - with implementations of both processing and learning blocks - and your model. You will need to include this library in your project to run your impulse locally.
 
 ## Getting Started
 
