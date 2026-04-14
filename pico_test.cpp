@@ -7,6 +7,8 @@
 #include "hardware/clocks.h"
 #include "hardware/adc.h"
 #include "ws2812.pio.h"
+#include "device/usbd_pvt.h"
+#include "device/usbd.h"
 
 /* TFLite Micro Inference */
 #include "micro-sdk/edge-impulse-sdk/classifier/ei_run_classifier.h"
@@ -101,25 +103,25 @@ static ei_impulse_result_t inference_result = {};
  */
 bool initializeInterpreter(void)
 {
-    led_on_with_color(LED_COLOR_RED); // Step 1: Started initialization
-    sleep_ms(200);
+    // led_on_with_color(LED_COLOR_RED); // Step 1: Started initialization
+    // sleep_ms(200);
 
     static tflite::AllOpsResolver resolver;
-    led_on_with_color(LED_COLOR_ORANGE); // Step 2: Resolver created
-    sleep_ms(200);
+    // led_on_with_color(LED_COLOR_ORANGE); // Step 2: Resolver created
+    // sleep_ms(200);
 
     static tflite::MicroInterpreter interpreter(
         tflite::GetModel(tflite_learn_958324_7),
         resolver,
         tensor_arena,
         TENSOR_ARENA_SIZE);
-    led_on_with_color(LED_COLOR_YELLOW); // Step 3: Interpreter created
-    sleep_ms(200);
+    // led_on_with_color(LED_COLOR_YELLOW); // Step 3: Interpreter created
+    // sleep_ms(200);
 
     g_interpreter = &interpreter;
     g_resolver = &resolver;
-    led_on_with_color(LED_COLOR_GREEN); // Step 4: Pointers assigned
-    sleep_ms(200);
+    // led_on_with_color(LED_COLOR_GREEN); // Step 4: Pointers assigned
+    // sleep_ms(200);
 
     // Allocate tensors
     if (g_interpreter->AllocateTensors(true) != kTfLiteOk)
@@ -131,9 +133,9 @@ bool initializeInterpreter(void)
         return false;
     }
 
-    led_on_with_color(LED_COLOR_BLUE); // Step 5: AllocateTensors successful
-    sleep_ms(200);
-    led_off();
+    // led_on_with_color(LED_COLOR_BLUE); // Step 5: AllocateTensors successful
+    // sleep_ms(200);
+    // led_off();
 
     printf("Interpreter initialized successfully\n");
     return true;
@@ -252,8 +254,15 @@ extern "C"
         {
             response[i] = (uint8_t)(output[i] * 255.0f);
         }
-        tud_vendor_n_write(0, response, 64);
-        tud_vendor_n_write_flush(0);
+
+        if (!usbd_edpt_busy(0, 0x83))
+        {
+            usbd_edpt_claim(0, 0x83);
+            usbd_edpt_xfer(0, 0x83, response, 64);
+        }
+
+        // tud_vendor_n_write(0, response, 64);
+        // tud_vendor_n_write_flush(0);
         // printf("[USB] TFLite inference results sent\n");
     }
 
@@ -450,6 +459,46 @@ bool led_get_state(void)
 }
 
 /* ============================================================================
+ * Memory Usage Monitoring
+ * ============================================================================
+ *
+ * Monitors RAM usage and logs available memory
+ */
+
+extern char __StackLimit, __bss_end__;
+
+/**
+ * Get free heap memory size
+ * @return Free memory in bytes
+ */
+uint32_t get_free_memory(void)
+{
+    // Pico: Total RAM is 264KB (0x42000)
+    // __bss_end__ points to end of BSS section
+    // Stack grows downward from top of RAM
+    extern char __StackLimit;
+    extern char __bss_end__;
+
+    uint32_t stack_limit = (uint32_t)&__StackLimit;
+    uint32_t bss_end = (uint32_t)&__bss_end__;
+    uint32_t heap_end = stack_limit;
+
+    return heap_end - bss_end;
+}
+
+/**
+ * Log memory usage information
+ */
+void log_memory_usage(void)
+{
+    uint32_t free_mem = get_free_memory();
+    uint32_t used_mem = 264 * 1024 - free_mem;
+
+    printf("[MEMORY] Used: %u KB, Free: %u KB, Total: 264 KB\n",
+           used_mem / 1024, free_mem / 1024);
+}
+
+/* ============================================================================
  * Temperature Sensor (ADC Channel 4)
  * ============================================================================
  *
@@ -499,6 +548,78 @@ extern "C"
 void usb_device_init(void)
 {
     tusb_init();
+}
+
+/* ============================================================================
+ * Temperature Data Transmission via USB
+ * ============================================================================ */
+
+// External endpoint number from usb_descriptors.c
+#define EPNUM_VENDOR_INT_IN 0x84
+
+/**
+ * Send temperature data via Bulk endpoint (polling-based)
+ * Protocol: [0xAA][temp_int][temp_frac]
+ * Example: 25.5°C → [0xAA][25][50]
+ */
+extern "C"
+{
+    void send_temperature_data_bulk(float temperature)
+    {
+        uint8_t response[3];
+        response[0] = 0xAA;                                                  // Temperature response marker
+        response[1] = (uint8_t)temperature;                                  // Integer part
+        response[2] = (uint8_t)((temperature - (uint8_t)temperature) * 100); // Fractional part (0-99)
+
+        tud_vendor_n_write(0, response, 3);
+        tud_vendor_n_write_flush(0);
+        // printf("[TEMP] Bulk sent: %.2f°C\n", temperature);
+    }
+
+    /**
+     * Send temperature data via Interrupt endpoint (periodic, low-latency)
+     * Interrupt endpoint provides automatic periodic polling (10ms interval)
+     * Ideal for sensor data that needs consistent, low-latency delivery
+     */
+    void send_temperature_data_interrupt(float temperature)
+    {
+        static uint8_t data[3];
+        data[0] = 0xBB;                                                  // Different marker for interrupt data
+        data[1] = (uint8_t)temperature;                                  // Integer part
+        data[2] = (uint8_t)((temperature - (uint8_t)temperature) * 100); // Fractional part
+
+        // Use low-level endpoint transfer API for interrupt endpoint
+
+        if (tud_mounted())
+        {
+            if (!usbd_edpt_busy(0, EPNUM_VENDOR_INT_IN))
+            {
+                usbd_edpt_claim(0, 0x84);
+                usbd_edpt_xfer(0, 0x84, data, sizeof(data));
+                printf("[TEMP] Interrupt sent: %.2f°C\n", temperature);
+                fflush(stdout);
+            }
+            else
+            {
+                printf("EP 0x84 is busy!\n");
+                fflush(stdout);
+            }
+        }
+        else
+        {
+            printf("tud_mounted not yet\n");
+            fflush(stdout);            
+        }
+    }
+
+    /**
+     * Wrapper function - can be changed to either bulk or interrupt
+     */
+    void send_temperature_data(float temperature)
+    {
+        // Change this to send_temperature_data_bulk() if you prefer bulk endpoint
+        send_temperature_data_interrupt(temperature);
+    }
 }
 
 /* ============================================================================
@@ -553,9 +674,16 @@ int main()
     // Initialize USB device stack
     usb_device_init();
 
-    // led_on_with_color(LED_COLOR_YELLOW);    // YELLOW가 아님
+    // Log initial memory usage
+    // log_memory_usage();
 
-    // Main processing loop - runs indefinitely
+    // // led_on_with_color(LED_COLOR_YELLOW);    // YELLOW가 아님
+
+    // // Main processing loop - runs indefinitely
+    uint32_t last_memory_log = 0;
+    uint32_t last_temp_send = 0;
+    const uint32_t TEMP_SEND_INTERVAL_MS = 1000; // Send temperature every 1 second
+
     while (true)
     {
         // Process USB events (bulk transfers, control transfers, etc.)
@@ -575,26 +703,6 @@ int main()
             // TODO: Initialize TFLite interpreter with model_buffer
             // This would be done here after model is fully received
         }
-
-        // Process image data and run inference
-        // if (image_ready)
-        // {
-        //     // Image data received and ready for inference
-        //     float output[64] = {
-        //         1,
-        //     };
-        //     if (runInference((const int8_t *)image_data_ptr, output))
-        //     {
-        //         led_on_with_color(LED_COLOR_BLUE);
-        //         // output[0] = 0x02;
-        //         send_tflite_inference_results(output);
-        //     } else {
-        //         led_on_with_color(LED_COLOR_RED);
-        //         // output[0] = 0x01;
-        //         send_tflite_inference_results_test(output);
-        //     }
-        //     image_ready = false;
-        // }
 
         // Process pending LED command from USB callback
         if (pending_command != 0xFF)
@@ -616,6 +724,17 @@ int main()
             default:
                 break;
             }
+        }
+
+        // Send temperature data at regular intervals
+        uint32_t now = to_ms_since_boot(get_absolute_time());
+        if (now - last_temp_send >= TEMP_SEND_INTERVAL_MS)
+        {
+            float temp = adc_get_temperature();
+            // printf("%f\n", temp);
+            // fflush(stdout);
+            send_temperature_data(temp);
+            last_temp_send = now;
         }
 
         // Optional: Reduce CPU load if needed

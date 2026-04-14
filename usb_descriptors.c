@@ -317,8 +317,9 @@ enum
 #define EPNUM_CDC_IN 0x82
 #define EPNUM_VENDOR_OUT 0x03
 #define EPNUM_VENDOR_IN 0x83
+#define EPNUM_VENDOR_INT_IN 0x84  // Interrupt endpoint for sensor data (temperature)
 
-#define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_VENDOR_DESC_LEN)
+#define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_VENDOR_DESC_LEN + 7)  // +7 for interrupt endpoint
 
 const uint8_t desc_configuration[] = {
     // Config number, interface count, string index, total length, attribute, power in mA
@@ -327,8 +328,18 @@ const uint8_t desc_configuration[] = {
     // CDC first (IAD is automatically included by TUD_CDC_DESCRIPTOR)
     TUD_CDC_DESCRIPTOR(ITF_NUM_CDC_CMD, 0, EPNUM_CDC_NOTIF, 8, EPNUM_CDC_OUT, EPNUM_CDC_IN, 64),
 
-    // Vendor second
-    TUD_VENDOR_DESCRIPTOR(ITF_NUM_VENDOR, 0, EPNUM_VENDOR_IN, EPNUM_VENDOR_OUT, 64)};
+    // 2. Vendor Interface (수동 정의)
+    // Interface Descriptor
+    9, TUSB_DESC_INTERFACE, ITF_NUM_VENDOR, 0, 3, // bNumEndpoints를 3으로 설정 (Bulk 2 + Int 1)
+    TUSB_CLASS_VENDOR_SPECIFIC, 0x00, 0x00, 0,    // Vendor Class, Subclass, Protocol, String Index
+
+    // Endpoint: Bulk IN
+    7, TUSB_DESC_ENDPOINT, EPNUM_VENDOR_IN, TUSB_XFER_BULK, 64, 0, 0,
+    // Endpoint: Bulk OUT
+    7, TUSB_DESC_ENDPOINT, EPNUM_VENDOR_OUT, TUSB_XFER_BULK, 64, 0, 0,
+    // Endpoint: Interrupt IN (온도 데이터용)
+    7, TUSB_DESC_ENDPOINT, EPNUM_VENDOR_INT_IN, TUSB_XFER_INTERRUPT, 8, 0, 10
+};
 
 // String Descriptor (UTF-16 LE format required by USB spec)
 
